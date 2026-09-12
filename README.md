@@ -6,7 +6,7 @@ The workflow automatically receives production incidents, analyzes severity and 
 
 🖼️ Workflow Overview
 
-<img width="959" height="409" alt="workfloow" src="https://github.com/user-attachments/assets/a3c5a4f2-577a-42f5-b1da-d8bd596fa6fc" />
+<img width="959" height="409" alt="AI Incident Response Workflow" src="https://github.com/user-attachments/assets/a3c5a4f2-577a-42f5-b1da-d8bd596fa6fc" />
 
 Webhook
    ↓
