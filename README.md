@@ -357,6 +357,3 @@ This workflow can be adapted for:
 
 Developed by [**Ali Faiz**](https://github.com/Alifaizllc)
 
-- [LinkedIn](https://www.linkedin.com/in/ali-khattak)
-- [GitHub](https://github.com/Alifaizllc)
-- [Portfolio](https://alifaiz-portfolio.vercel.app/)
