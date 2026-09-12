@@ -1,0 +1,1580 @@
+{
+  "name": "AI Incident Response & Engineering Operations Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-incident-response",
+        "options": {}
+      },
+      "id": "e1e8da12-d228-4a5b-901b-f9ff19eae564",
+      "name": "Incident Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        1280,
+        -368
+      ],
+      "webhookId": "18342ea3-85c0-4c36-8804-2ff2b840c8ae"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f01101f8-8fd9-43a2-a801-5b7394b50a49",
+              "name": "title",
+              "type": "string",
+              "value": "={{ String($json.body?.title ?? $json.title ?? 'Untitled incident').trim() || 'Untitled incident' }}"
+            },
+            {
+              "id": "2871d681-bfbe-478e-8400-ee9f14a80517",
+              "name": "description",
+              "type": "string",
+              "value": "={{ String($json.body?.description ?? $json.description ?? '').trim() }}"
+            },
+            {
+              "id": "40cf6ec7-d88a-4ac4-9e61-6b5d8be4ea52",
+              "name": "service",
+              "type": "string",
+              "value": "={{ String($json.body?.service ?? $json.service ?? 'unknown-service').trim() || 'unknown-service' }}"
+            },
+            {
+              "id": "25a20225-8eb6-444b-ba52-ea3485ef41b2",
+              "name": "service_url",
+              "type": "string",
+              "value": "={{ String($json.body?.service_url ?? $json.service_url ?? '').trim() }}"
+            },
+            {
+              "id": "7cc401be-7481-46fd-b1a7-8e023562c1ee",
+              "name": "source",
+              "type": "string",
+              "value": "={{ String($json.body?.source ?? $json.source ?? 'webhook').trim() || 'webhook' }}"
+            },
+            {
+              "id": "9706608a-df60-429c-af24-247178b2b0d3",
+              "name": "demo_mode",
+              "type": "boolean",
+              "value": "={{ [true, 1, '1', 'true', 'yes'].includes($json.body?.demo_mode ?? $json.demo_mode ?? false) }}"
+            },
+            {
+              "id": "ade09a41-40c8-4be6-9b10-b7ce29d46b25",
+              "name": "received_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d20e14d1-1046-4bf2-a801-86fec350de84",
+      "name": "Normalize Incident",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1872,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this software incident.\n\nTitle: {{ $json.title }}\nDescription: {{ $json.description }}\nService: {{ $json.service }}\n\nReturn ONLY compact valid JSON:\n\n{\n  \"severity\": \"low|medium|high|critical\",\n  \"category\": \"short category\",\n  \"team\": \"Backend|Frontend|DevOps|Security|Data|Platform|Payments|General Engineering\",\n  \"summary\": \"short sentence\",\n  \"probable_cause\": \"short hypothesis\",\n  \"recommended_action\": \"short action\"\n}\n\nNo markdown. No explanation. Keep every value concise.",
+        "batching": {}
+      },
+      "id": "b4e2923b-02f6-47e4-b63d-fcce9e0ad4f9",
+      "name": "AI Incident Triage",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2432,
+        -368
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 600,
+          "temperature": 0.1
+        }
+      },
+      "id": "e38aa0c1-541d-4a68-9fe4-ef7c3d96645d",
+      "name": "Groq — Triage Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        0
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "h4NbgpQiy247mcN6",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Normalize Incident').first().json;\n\nlet raw = $json.text ?? $json.output ?? $json;\nlet triage = {};\n\nif (raw && typeof raw === 'object' && !Array.isArray(raw)) {\n  triage = raw;\n} else if (typeof raw === 'string') {\n  const cleaned = raw\n    .replace(/```json/gi, '')\n    .replace(/```/g, '')\n    .trim();\n\n  const jsonCandidate = cleaned.match(/\\{[\\s\\S]*\\}/)?.[0] ?? cleaned;\n\n  try {\n    triage = JSON.parse(jsonCandidate);\n  } catch {\n    triage = {};\n  }\n}\n\nconst allowedSeverities = new Set(['low', 'medium', 'high', 'critical']);\nconst requestedSeverity = String(triage.severity || '').trim().toLowerCase();\nconst severity = allowedSeverities.has(requestedSeverity) ? requestedSeverity : 'medium';\n\nconst allowedTeams = new Set([\n  'Backend',\n  'Frontend',\n  'DevOps',\n  'Security',\n  'Data',\n  'Platform',\n  'Payments',\n  'General Engineering'\n]);\n\nconst requestedTeam = String(triage.team || '').trim();\nconst team = allowedTeams.has(requestedTeam) ? requestedTeam : 'General Engineering';\n\nconst category = String(triage.category || 'unknown').trim() || 'unknown';\n\nconst slaMinutes = {\n  critical: 15,\n  high: 30,\n  medium: 120,\n  low: 240\n};\n\nconst normalizedService = String(base.service || 'unknown-service')\n  .trim()\n  .toLowerCase()\n  .replace(/\\s+/g, '-');\n\nconst normalizedTitle = String(base.title || 'untitled incident')\n  .trim()\n  .toLowerCase()\n  .replace(/\\s+/g, ' ');\n\nreturn [{\n  json: {\n    ...base,\n    severity,\n    category,\n    team,\n    ai_summary: String(triage.summary || base.description || base.title).trim(),\n    probable_cause: String(triage.probable_cause || 'Unknown — requires investigation').trim(),\n    recommended_action: String(triage.recommended_action || 'Review logs and investigate the affected service').trim(),\n    fingerprint: `${normalizedService}|${normalizedTitle}`,\n    status: 'investigating',\n    sla_minutes: slaMinutes[severity] || 120,\n    sla_wait_seconds: base.demo_mode\n      ? 20\n      : (slaMinutes[severity] || 120) * 60,\n    triage_parse_fallback: Object.keys(triage).length === 0\n  }\n}];"
+      },
+      "id": "5f21d875-f806-4680-9e4e-51c06dfda644",
+      "name": "Prepare Incident",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3024,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "incidents",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "fingerprint",
+              "condition": "eq",
+              "keyValue": "={{ $('Prepare Incident').first().json.fingerprint }}"
+            }
+          ]
+        }
+      },
+      "id": "ab31cf11-6562-49d7-b82f-422b97878aad",
+      "name": "Supabase — Get Incidents",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3616,
+        -368
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('Prepare Incident').first().json;\n\nconst rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r && r.id != null)\n  .sort((a, b) => {\n    const ta = new Date(a.last_seen_at || a.updated_at || a.created_at || 0).getTime();\n    const tb = new Date(b.last_seen_at || b.updated_at || b.created_at || 0).getTime();\n    return tb - ta;\n  });\n\nconst existing = rows.find(r =>\n  r.fingerprint === current.fingerprint &&\n  !['resolved', 'closed'].includes(String(r.status || '').toLowerCase())\n);\n\nreturn [{\n  json: {\n    ...current,\n    duplicate: Boolean(existing),\n    existing_incident_id: existing?.id ?? null,\n    existing_issue_number: existing?.github_issue_number ?? null,\n    existing_issue_url: existing?.github_issue_url ?? '',\n    existing_status: existing?.status ?? null,\n    duplicate_count: existing ? Number(existing.duplicate_count || 1) + 1 : 1\n  }\n}];"
+      },
+      "id": "ff7f555e-c1dd-4614-a9c4-5e39409bd46c",
+      "name": "Detect Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4240,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ab2b3765-4897-4d15-83cb-a797e1361380",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8a8ca4ff-eef8-4eed-b6d8-2a7fbf8ea212",
+      "name": "Duplicate Incident?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "incidents",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.existing_incident_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "duplicate_count",
+              "fieldValue": "={{ $json.duplicate_count }}"
+            },
+            {
+              "fieldId": "last_seen_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "severity",
+              "fieldValue": "={{ $json.severity }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $json.category }}"
+            },
+            {
+              "fieldId": "team",
+              "fieldValue": "={{ $json.team }}"
+            },
+            {
+              "fieldId": "ai_summary",
+              "fieldValue": "={{ $json.ai_summary }}"
+            },
+            {
+              "fieldId": "probable_cause",
+              "fieldValue": "={{ $json.probable_cause }}"
+            },
+            {
+              "fieldId": "recommended_action",
+              "fieldValue": "={{ $json.recommended_action }}"
+            }
+          ]
+        }
+      },
+      "id": "c02f08e7-f495-45e1-98bf-df489eb2bee3",
+      "name": "Supabase — Update Duplicate",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "incidents",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "title",
+              "fieldValue": "={{ $json.title }}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{ $json.description }}"
+            },
+            {
+              "fieldId": "service",
+              "fieldValue": "={{ $json.service }}"
+            },
+            {
+              "fieldId": "service_url",
+              "fieldValue": "={{ $json.service_url }}"
+            },
+            {
+              "fieldId": "severity",
+              "fieldValue": "={{ $json.severity }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $json.category }}"
+            },
+            {
+              "fieldId": "team",
+              "fieldValue": "={{ $json.team }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "investigating"
+            },
+            {
+              "fieldId": "ai_summary",
+              "fieldValue": "={{ $json.ai_summary }}"
+            },
+            {
+              "fieldId": "probable_cause",
+              "fieldValue": "={{ $json.probable_cause }}"
+            },
+            {
+              "fieldId": "recommended_action",
+              "fieldValue": "={{ $json.recommended_action }}"
+            },
+            {
+              "fieldId": "fingerprint",
+              "fieldValue": "={{ $json.fingerprint }}"
+            },
+            {
+              "fieldId": "duplicate_count",
+              "fieldValue": "1"
+            },
+            {
+              "fieldId": "created_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "last_seen_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "efaf7a62-6487-45c4-b752-690d998985ee",
+      "name": "Supabase — Create Incident",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        960,
+        1216
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Investigate the incident below.\n\nTitle: {{ $json.title }}\nDescription: {{ $json.description }}\nService: {{ $json.service }}\nService URL: {{ $json.service_url }}\nSeverity: {{ $json.severity }}\nCategory: {{ $json.category }}\nInitial probable cause: {{ $json.probable_cause }}\nHealth check evidence: {{ JSON.stringify($json.health_check) }}\n\nTool available:\n- engineering_runbook: search engineering recovery/runbook knowledge\n\nRequirements:\n- Always call engineering_runbook at least once using a short query based on category + main symptom.\n- Treat health_check evidence as factual. Never invent a service-health result.\n- If health_check.checked is false, clearly say that no valid health endpoint was checked.\n- Separate evidence from hypotheses.\n- Keep the answer concise and operational.\n\nReturn plain text only in this exact format:\nEvidence:\nRunbook Guidance:\nHealth Check:\nProbable Cause:\nRecommended Action:\nRisk Level:\n\nDo not use Markdown tables.\nDo not use ** formatting.\nDo not invent facts.\n",
+        "options": {
+          "systemMessage": "You are a software incident investigator. Use factual tool results when available and clearly separate evidence from hypotheses."
+        }
+      },
+      "id": "192be766-45c5-44e9-bd80-f114244e74ef",
+      "name": "AI Incident Investigator",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2320,
+        992
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 800,
+          "temperature": 0.2
+        }
+      },
+      "id": "2fd728a4-ccbb-4b0e-8289-0ebcf6c84673",
+      "name": "Groq — Investigator Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        1536
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "h4NbgpQiy247mcN6",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Search engineering runbooks for troubleshooting and recovery guidance.\n\nUse this tool for authentication failures, login errors, API downtime, database incidents, deployment failures, performance/latency problems, and security incidents.\n\nAlways search using the affected service, incident category, and main symptoms.",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "topK": 5,
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "26c75f0f-3e33-4281-a54d-1a8978500e5d",
+      "name": "Engineering Runbook RAG",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        2480,
+        1328
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "30d857e6-7f6e-4111-b96a-7c148645dc03",
+              "leftValue": "={{ \n  !$('Detect Duplicate').first().json.duplicate ||\n  !$('Detect Duplicate').first().json.existing_issue_number\n}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "beb2bbbf-dc88-492f-9305-cb36c4ae8f05",
+      "name": "New Incident?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2976,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "owner": {
+          "__rl": true,
+          "value": "alifaiztech-soultion",
+          "mode": "name"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "ai-incident-response-demo",
+          "mode": "name"
+        },
+        "title": "=[{{ $('Prepare Incident').first().json.severity.toUpperCase() }}] {{ $('Prepare Incident').first().json.title }}",
+        "body": "={{\n[\n  '## Incident',\n  `**Service:** ${$('Prepare Incident').first().json.service}`,\n  `**Severity:** ${$('Prepare Incident').first().json.severity}`,\n  `**Category:** ${$('Prepare Incident').first().json.category}`,\n  `**Team:** ${$('Prepare Incident').first().json.team}`,\n  '',\n  '### AI Triage',\n  $('Prepare Incident').first().json.ai_summary,\n  '',\n  '### Probable Cause',\n  $('Prepare Incident').first().json.probable_cause,\n  '',\n  '### Recommended Action',\n  $('Prepare Incident').first().json.recommended_action,\n  '',\n  '### Investigation',\n  $('AI Incident Investigator').first().json.output\n].join('\\n')\n}}",
+        "labels": [],
+        "assignees": []
+      },
+      "id": "ac72e8cd-7e21-4ed6-8bde-e06b88ba4d4c",
+      "name": "GitHub — Create Issue",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        384
+      ],
+      "webhookId": "8f6bfb91-b282-4b89-bdbb-8507589f626f",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "3uchZMwnshlpBBWU",
+          "name": "GitHub account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "incidents",
+        "filterType": "string",
+        "filterString": "=id=eq.{{ Number($if(\n  $('Detect Duplicate').first().json.duplicate,\n  $('Detect Duplicate').first().json.existing_incident_id,\n  $('Supabase — Create Incident').first().json.id\n)) }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "github_issue_number",
+              "fieldValue": "={{ $json.number || $json.issueNumber }}"
+            },
+            {
+              "fieldId": "github_issue_url",
+              "fieldValue": "={{ $json.html_url || $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "6c0d7ab0-4f1b-4c6a-86cd-df8832c03c74",
+      "name": "Supabase — Link GitHub Issue",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3776,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "28662fa4-94ed-4d84-91c4-af548cd48ab5",
+              "name": "github_issue_number",
+              "type": "number",
+              "value": "={{ $('Detect Duplicate').first().json.existing_issue_number }}"
+            },
+            {
+              "id": "86db3b7e-e772-4ba1-99ac-8a4d996b7b04",
+              "name": "github_issue_url",
+              "type": "string",
+              "value": "={{ $('Detect Duplicate').first().json.existing_issue_url }}"
+            },
+            {
+              "id": "b5836249-630f-401a-a5df-1a43c2b2fe24",
+              "name": "incident_id",
+              "type": "number",
+              "value": "={{ Number($('Detect Duplicate').first().json.existing_incident_id) }}"
+            },
+            {
+              "id": "6c2f399a-55c2-42c7-b434-58d5ed232b2d",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ $('Prepare Incident').first().json.severity }}"
+            },
+            {
+              "id": "0eda0d7c-3a78-47f7-b1fe-9aec34780b15",
+              "name": "sla_wait_seconds",
+              "type": "number",
+              "value": "={{ $('Prepare Incident').first().json.sla_wait_seconds }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "74fd3708-be74-43ea-81bb-59c601d66afc",
+      "name": "Use Existing Issue",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3344,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c38cebbc-67aa-4cf0-8ad3-a201bea8d537",
+              "name": "incident_id",
+              "type": "number",
+              "value": "={{ Number($if(\n  $('Detect Duplicate').first().json.duplicate,\n  $('Detect Duplicate').first().json.existing_incident_id,\n  $('Supabase — Create Incident').first().json.id\n)) }}"
+            },
+            {
+              "id": "159c2e5c-2c9c-4566-aea8-49057dcac327",
+              "name": "github_issue_number",
+              "type": "number",
+              "value": "={{ $('GitHub — Create Issue').first().json.number }}"
+            },
+            {
+              "id": "9e282372-5790-4566-ae56-9c778684ebb1",
+              "name": "github_issue_url",
+              "type": "string",
+              "value": "={{ $('GitHub — Create Issue').first().json.html_url }}"
+            },
+            {
+              "id": "1f7608ee-59b6-41a8-ba4b-8fc03c6191ce",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ $('Prepare Incident').first().json.severity }}"
+            },
+            {
+              "id": "95e5712b-b413-46a0-b86f-fe06efad8539",
+              "name": "sla_wait_seconds",
+              "type": "number",
+              "value": "={{ $('Prepare Incident').first().json.sla_wait_seconds }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "42fef539-d594-4efc-ad52-2efa03f13742",
+      "name": "Prepare Alert Context — New",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4208,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9fc3ff7a-0b2e-4b4c-89b5-952cb56fd3f1",
+              "name": "incident_id",
+              "type": "number",
+              "value": "={{ Number($('Detect Duplicate').first().json.existing_incident_id) }}"
+            },
+            {
+              "id": "9100161c-823d-4258-8991-ecec101f83fc",
+              "name": "github_issue_number",
+              "type": "number",
+              "value": "={{ $('Detect Duplicate').first().json.existing_issue_number }}"
+            },
+            {
+              "id": "e435f7a2-71f6-4a68-827e-919a0293819d",
+              "name": "github_issue_url",
+              "type": "string",
+              "value": "={{ $('Detect Duplicate').first().json.existing_issue_url }}"
+            },
+            {
+              "id": "062fc4ed-a37e-420f-ac53-761f24c6b887",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ $('Prepare Incident').first().json.severity }}"
+            },
+            {
+              "id": "4bef9d56-b56b-4923-bb22-5047bc03d48b",
+              "name": "sla_wait_seconds",
+              "type": "number",
+              "value": "={{ $('Prepare Incident').first().json.sla_wait_seconds }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ccd9f5eb-db19-4d54-9d0a-59bfe1dddf64",
+      "name": "Prepare Alert Context — Duplicate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3760,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "da1c383e-5ab2-4a40-84c1-e5238b5aa102",
+              "leftValue": "={{ ['high','critical'].includes($json.severity) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4957f6c2-12f8-4ea0-b57f-1b37d96da4b9",
+      "name": "High / Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4448,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "alifaiz.tech@gmail.com",
+        "subject": "=🚨 {{ $('Prepare Incident').first().json.severity.toUpperCase() }} Incident: {{ $('Prepare Incident').first().json.title }}",
+        "emailType": "text",
+        "message": "={{\n[\n  `Service: ${$('Prepare Incident').first().json.service}`,\n  `Severity: ${$('Prepare Incident').first().json.severity.toUpperCase()}`,\n  `Team: ${$('Prepare Incident').first().json.team}`,\n  '',\n  'Summary:',\n  $('Prepare Incident').first().json.ai_summary,\n  '',\n  'Investigation:',\n  $('AI Incident Investigator').first().json.output,\n  '',\n  `GitHub Issue: ${$json.github_issue_url}`\n].join('\\n')\n}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a5f56790-6be8-491b-8121-08266a67e36e",
+      "name": "Gmail — Urgent Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        4800,
+        336
+      ],
+      "webhookId": "c36a4fe9-7119-4642-90bf-5d6015a858ca",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "u0Xo6FzUoRqBXrN8",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "sendTo": "alifaiz.tech@gmail.com",
+        "subject": "=ℹ️ {{ $('Prepare Incident').first().json.severity.toUpperCase() }} Incident: {{ $('Prepare Incident').first().json.title }}",
+        "emailType": "text",
+        "message": "={{\n[\n  `Service: ${$('Prepare Incident').first().json.service}`,\n  `Severity: ${$('Prepare Incident').first().json.severity.toUpperCase()}`,\n  `Team: ${$('Prepare Incident').first().json.team}`,\n  '',\n  'Summary:',\n  $('Prepare Incident').first().json.ai_summary,\n  '',\n  'Investigation:',\n  $('AI Incident Investigator').first().json.output,\n  '',\n  `GitHub Issue: ${$json.github_issue_url}`\n].join('\\n')\n}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "88f6c83f-1c8b-4263-82c2-4fe008ab5e7c",
+      "name": "Gmail — Standard Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        4768,
+        1552
+      ],
+      "webhookId": "a0e3251f-ef98-4674-ab48-564a7084df82",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "u0Xo6FzUoRqBXrN8",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": "={{ Number($('Prepare Incident').first().json.sla_wait_seconds ?? 20) }}"
+      },
+      "id": "08530756-4ec3-485c-82a4-5f20619242b9",
+      "name": "Wait for SLA",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5136,
+        960
+      ],
+      "webhookId": "d82b8d00-90c0-4fb1-9135-165600db9aff"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "get",
+        "owner": {
+          "__rl": true,
+          "value": "alifaiztech-soultion",
+          "mode": "name"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "ai-incident-response-demo",
+          "mode": "name"
+        },
+        "issueNumber": "={{ Number(\n  $if(\n    $('Prepare Alert Context — New').isExecuted,\n    $('Prepare Alert Context — New').first().json.github_issue_number,\n    $('Prepare Alert Context — Duplicate').first().json.github_issue_number\n  )\n) }}"
+      },
+      "id": "e37dd3dd-735c-48c9-9918-3221d1c1ee5a",
+      "name": "GitHub — Check Issue",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        5520,
+        960
+      ],
+      "webhookId": "f0304168-b328-419e-a394-b17439879301",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "3uchZMwnshlpBBWU",
+          "name": "GitHub account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "00cddd38-ad1d-4662-8d21-7d07f68da94b",
+              "leftValue": "={{ String($json.state || '').toLowerCase() }}",
+              "rightValue": "open",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a7999f6-be58-4011-a5b9-89a22cdf548a",
+      "name": "Issue Still Open?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5904,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "alifaiz.tech@gmail.com",
+        "subject": "=⏱ SLA Escalation: {{ $('Prepare Incident').first().json.title }}",
+        "emailType": "text",
+        "message": "={{\n[\n  'The incident is still OPEN after its SLA window.',\n  '',\n  `Severity: ${$('Prepare Incident').first().json.severity.toUpperCase()}`,\n  `Service: ${$('Prepare Incident').first().json.service}`,\n  `GitHub Issue: ${$('High / Critical?').first().json.github_issue_url}`,\n  '',\n  'Please escalate the investigation.'\n].join('\\n')\n}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0baedfad-28a0-4ed1-b4c8-97a9efd6eb5d",
+      "name": "Gmail — SLA Escalation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        6208,
+        368
+      ],
+      "webhookId": "fa8ca23a-e01a-4e5f-8617-2de1214b80c6",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "u0Xo6FzUoRqBXrN8",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "incidents",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ Number(\n  $if(\n    $('Detect Duplicate').first().json.duplicate,\n    $('Detect Duplicate').first().json.existing_incident_id,\n    $('Supabase — Create Incident').first().json.id\n  )\n) }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "escalated"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "5e5090a3-ec2b-4f82-911c-afef7d193bfc",
+      "name": "Supabase — Mark Escalated",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6624,
+        368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Generate a concise engineering incident postmortem using only the evidence below.\n\nTitle: {{ $('Prepare Incident').first().json.title }}\nService: {{ $('Prepare Incident').first().json.service }}\nSeverity: {{ $('Prepare Incident').first().json.severity }}\nInitial Summary: {{ $('Prepare Incident').first().json.ai_summary }}\nInitial Probable Cause: {{ $('Prepare Incident').first().json.probable_cause }}\nInvestigation: {{ $('AI Incident Investigator').first().json.output }}\nGitHub Issue State: {{ $('GitHub — Check Issue').first().json.state }}\nGitHub Closed At: {{ $('GitHub — Check Issue').first().json.closed_at || 'not provided' }}\n\nThe GitHub issue is closed.\n\nReturn:\n1. Incident Summary\n2. Impact\n3. Root Cause / Best Supported Explanation\n4. Investigation & Resolution\n5. Preventive Actions\n6. Lessons Learned\n\nDo not invent facts. If the exact root cause or resolution steps are not present in the evidence, explicitly label them as unknown or a hypothesis.\n",
+        "batching": {}
+      },
+      "id": "9438e523-1ef3-45de-ae59-56149e3159eb",
+      "name": "AI Postmortem",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        6272,
+        1088
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 1000,
+          "temperature": 0.2
+        }
+      },
+      "id": "c6393239-735b-4b58-9a4e-d79edfb158b0",
+      "name": "Groq — Postmortem Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        6000,
+        1632
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "h4NbgpQiy247mcN6",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "incidents",
+        "filterType": "string",
+        "filterString": "={{ \n  'id=eq.' + Number(\n    $if(\n      $('Detect Duplicate').first().json.duplicate,\n      $('Detect Duplicate').first().json.existing_incident_id,\n      $('Supabase — Create Incident').first().json.id\n    )\n  )\n}}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "resolved"
+            },
+            {
+              "fieldId": "postmortem",
+              "fieldValue": "={{ $('AI Postmortem').first().json.text || $('AI Postmortem').first().json.output }}"
+            },
+            {
+              "fieldId": "resolved_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "7256a011-d731-48b2-87be-79ee60b2b4d7",
+      "name": "Supabase — Mark Resolved",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6768,
+        1088
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "supabaseApi": {
+          "id": "xoGDh2jNIqHUvJu2",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "alifaiz.tech@gmail.com",
+        "subject": "=✅ Resolved: {{ $('Prepare Incident').first().json.title }}",
+        "emailType": "text",
+        "message": "={{\n[\n  'Incident resolved.',\n  '',\n  `Service: ${$('Prepare Incident').first().json.service}`,\n  `Severity: ${$('Prepare Incident').first().json.severity.toUpperCase()}`,\n  `GitHub Issue: ${$('High / Critical?').first().json.github_issue_url}`,\n  '',\n  'POSTMORTEM',\n  '',\n  ($('AI Postmortem').first().json.text || $('AI Postmortem').first().json.output || 'Postmortem unavailable')\n].join('\\n')\n}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a8ace09b-cfb6-48d2-af2e-a7c3644c8b44",
+      "name": "Gmail — Resolution Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        7200,
+        1088
+      ],
+      "webhookId": "96dec48e-e2a2-4217-93a5-d9caa0b73bc7",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "u0Xo6FzUoRqBXrN8",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2352,
+        1712
+      ],
+      "id": "dabb4cfc-83d8-4bb3-a34c-1acb16ec8334",
+      "name": "Embeddings Google Gemini1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "H1xhDxUW7huZu0G7",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e4ff91d2-494b-4dc5-98de-356de1e3ce5c",
+              "leftValue": "={{ /^https?:\\/\\//i.test(String($('Prepare Incident').first().json.service_url || '')) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f223f16-d5d5-4764-b147-81decb446d43",
+      "name": "Valid Service URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare Incident').first().json.service_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "4ea6596e-fe7d-4d3d-bf37-a761a3fbd46f",
+      "name": "HTTP — Service Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1920,
+        464
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const incident = $('Prepare Incident').first().json;\nconst url = String(incident.service_url || '').trim();\nconst validUrl = /^https?:\\/\\//i.test(url);\nconst input = $input.first()?.json ?? {};\n\nlet health_check;\n\nif (!validUrl) {\n  health_check = {\n    checked: false,\n    url,\n    reason: url ? 'Invalid service_url; only http/https URLs are checked' : 'No service_url supplied'\n  };\n} else if (input.error) {\n  health_check = {\n    checked: true,\n    url,\n    reachable: false,\n    healthy: false,\n    error: String(input.error.message || input.error.description || 'Health check request failed')\n  };\n} else {\n  const statusCodeRaw = input.statusCode ?? input.status ?? null;\n  const statusCode = statusCodeRaw === null ? null : Number(statusCodeRaw);\n\n  let body = input.body ?? '';\n  if (typeof body !== 'string') {\n    try {\n      body = JSON.stringify(body);\n    } catch {\n      body = String(body);\n    }\n  }\n\n  health_check = {\n    checked: true,\n    url,\n    reachable: true,\n    status_code: Number.isFinite(statusCode) ? statusCode : null,\n    healthy: Number.isFinite(statusCode) ? statusCode >= 200 && statusCode < 400 : null,\n    response_preview: body.slice(0, 500)\n  };\n}\n\nreturn [{\n  json: {\n    ...incident,\n    health_check\n  }\n}];"
+      },
+      "id": "63f38ed5-0abd-4b5b-9b4e-5268beed4cbb",
+      "name": "Prepare Health Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        960
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Incident Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Incident",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Incident": {
+      "main": [
+        [
+          {
+            "node": "AI Incident Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq — Triage Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Incident Triage",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Incident Triage": {
+      "main": [
+        [
+          {
+            "node": "Prepare Incident",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Incident": {
+      "main": [
+        [
+          {
+            "node": "Supabase — Get Incidents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase — Get Incidents": {
+      "main": [
+        [
+          {
+            "node": "Detect Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Incident?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate Incident?": {
+      "main": [
+        [
+          {
+            "node": "Supabase — Update Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase — Create Incident",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase — Update Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Valid Service URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase — Create Incident": {
+      "main": [
+        [
+          {
+            "node": "Valid Service URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq — Investigator Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Incident Investigator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Engineering Runbook RAG": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Incident Investigator",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Incident Investigator": {
+      "main": [
+        [
+          {
+            "node": "New Incident?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Incident?": {
+      "main": [
+        [
+          {
+            "node": "GitHub — Create Issue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Existing Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub — Create Issue": {
+      "main": [
+        [
+          {
+            "node": "Supabase — Link GitHub Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase — Link GitHub Issue": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert Context — New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Existing Issue": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert Context — Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert Context — New": {
+      "main": [
+        [
+          {
+            "node": "High / Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert Context — Duplicate": {
+      "main": [
+        [
+          {
+            "node": "High / Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High / Critical?": {
+      "main": [
+        [
+          {
+            "node": "Gmail — Urgent Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail — Standard Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail — Urgent Alert": {
+      "main": [
+        [
+          {
+            "node": "Wait for SLA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail — Standard Alert": {
+      "main": [
+        [
+          {
+            "node": "Wait for SLA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for SLA": {
+      "main": [
+        [
+          {
+            "node": "GitHub — Check Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub — Check Issue": {
+      "main": [
+        [
+          {
+            "node": "Issue Still Open?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Still Open?": {
+      "main": [
+        [
+          {
+            "node": "Gmail — SLA Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Postmortem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail — SLA Escalation": {
+      "main": [
+        [
+          {
+            "node": "Supabase — Mark Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq — Postmortem Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Postmortem",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Postmortem": {
+      "main": [
+        [
+          {
+            "node": "Supabase — Mark Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase — Mark Resolved": {
+      "main": [
+        [
+          {
+            "node": "Gmail — Resolution Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Engineering Runbook RAG",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Service URL?": {
+      "main": [
+        [
+          {
+            "node": "HTTP — Service Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Health Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP — Service Health Check": {
+      "main": [
+        [
+          {
+            "node": "Prepare Health Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Health Context": {
+      "main": [
+        [
+          {
+            "node": "AI Incident Investigator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "23701864-6625-4378-9419-eff068a55a4f",
+  "meta": {
+    "instanceId": "06c855e0b535b76397fc931602247e505c649d5ba21dd68af2c489895287f49a"
+  },
+  "nodeGroups": [],
+  "id": "a3eN2QtG8sBCm8MK",
+  "tags": []
+}
